@@ -1,0 +1,6 @@
+{
+  "name": "GlowUp Girls",
+  "description": "Best Beauty Products | Sabse behtareen aur chune hue beauty products ek hi jagah par.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}

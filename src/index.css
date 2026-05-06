@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Cormorant Garamond", serif;
+  --font-display: "Playfair Display", serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --color-glow-base: #fff5f8;
+  --color-glow-header: #ff85a2;
+  --color-glow-accent: #ff477e;
+  --color-glow-hero: #ffe0e9;
+  --color-luxury-ink: #333333;
+}
+
+@layer base {
+  body {
+    @apply bg-glow-base text-luxury-ink font-sans antialiased;
+  }
+
+  h1, h2, h3 {
+    @apply font-serif;
+  }
+}
+
+.glow-card {
+  @apply relative;
+}
+
+.glow-card::after {
+  content: "";
+  @apply absolute inset-0 -z-10 bg-glow-accent/5 blur-2xl opacity-0 transition-opacity duration-500;
+}
+
+.glow-card:hover::after {
+  @apply opacity-100;
+}
+
+.glass-panel {
+  @apply bg-white/10 backdrop-blur-md border border-white/20;
+}
+
+.glow-underline {
+  @apply relative cursor-pointer before:absolute before:-bottom-1 before:left-0 before:w-0 before:h-px before:bg-glow-accent before:transition-all hover:before:w-full;
+}
+
+@keyframes scan {
+  0% { top: 0%; }
+  100% { top: 100%; }
+}
+
+.scan-line {
+  @apply absolute left-0 right-0 h-1 bg-glow-accent/50 shadow-[0_0_15px_rgba(255,71,126,0.8)] z-10 pointer-events-none;
+  animation: scan 2s linear infinite;
+}
+
+.scanner-video {
+  @apply w-full h-full object-cover;
+}

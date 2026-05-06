@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Search, 
@@ -20,9 +20,59 @@ import {
   ArrowLeft,
   MoreVertical,
   Clock,
-  CheckCircle2
+  CheckCircle2,
+  Loader2
 } from "lucide-react";
 import { getSkinAdvice } from "./services/geminiService.ts";
+import { db, auth } from "./lib/firebase";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 interface Order {
   id: string;
@@ -124,6 +174,15 @@ const PRODUCTS = [
     price: "₹750",
     image: "https://images.unsplash.com/photo-1620916566398-39f1143ab7be?q=80&w=800&auto=format&fit=crop",
     rating: 5
+  },
+  {
+    id: 10,
+    name: "Celestial Body Mist",
+    collection: "vibe",
+    category: "Fresh Spirit",
+    price: "₹100",
+    image: "https://images.unsplash.com/photo-1547887538-e3a2f32cb1cc?q=80&w=800&auto=format&fit=crop",
+    rating: 5
   }
 ];
 
@@ -145,6 +204,12 @@ export default function App() {
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
   const [checkoutProduct, setCheckoutProduct] = useState<typeof PRODUCTS[0] | null>(null);
   const [checkoutStep, setCheckoutStep] = useState<"summary" | "shipping" | "success">("summary");
+  
+  // Scanner States
+  const [isScanning, setIsScanning] = useState(false);
+  const [scannerStream, setScannerStream] = useState<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
   const [shippingData, setShippingData] = useState({
     name: "",
     street: "",
@@ -154,11 +219,6 @@ export default function App() {
     phone: ""
   });
   
-  // Scanner States
-  const [isScanning, setIsScanning] = useState(false);
-  const [scannerStream, setScannerStream] = useState<MediaStream | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-
   const filteredProducts = PRODUCTS.filter(p => {
     const matchesCollection = activeCollection === "all" || p.collection === activeCollection;
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -225,14 +285,14 @@ export default function App() {
       // Artificial scan delay
       setTimeout(async () => {
         setLoadingAdvice(true);
-        const result = await getSkinAdvice(consultationText || "I've just scanned my skin, detect if it's oily, dry, or sensitive and suggest a specific ingredient.");
+        const result = await getSkinAdvice(consultationText || "I've just scanned my skin, detect if it's oily, dry, or sensitive and suggest a specific ritual ingredient.");
         setAdvice(result);
         setLoadingAdvice(false);
         stopScanner();
       }, 4000);
     } catch (err) {
       console.error("Camera error:", err);
-      alert("Please allow camera access for the AI Skin Scan.");
+      alert("Please allow camera access for the AI Skin Ritual Scan.");
     }
   };
 
@@ -295,6 +355,29 @@ export default function App() {
   const cancelOrder = (orderId: string) => {
     if (window.confirm("Are you sure you want to withdraw from this skin ritual?")) {
       setOrders(prev => prev.filter(o => o.id !== orderId));
+    }
+  };
+
+  const [newsletterEmail, setNewsletterEmail] = useState("");
+  const [newsletterStatus, setNewsletterStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+
+  const handleNewsletterSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newsletterEmail || !newsletterEmail.includes("@")) return;
+
+    setNewsletterStatus("loading");
+    const path = "newsletter_subscriptions";
+    try {
+      await addDoc(collection(db, path), {
+        email: newsletterEmail,
+        subscribedAt: serverTimestamp(),
+      });
+      setNewsletterStatus("success");
+      setNewsletterEmail("");
+      setTimeout(() => setNewsletterStatus("idle"), 5000);
+    } catch (error) {
+      setNewsletterStatus("error");
+      handleFirestoreError(error, OperationType.CREATE, path);
     }
   };
 
@@ -630,6 +713,20 @@ export default function App() {
         </div>
       </section>
 
+      {/* Floating Action Button for Camera */}
+      <motion.button
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
+        onClick={() => setConsultantOpen(true)}
+        className="fixed bottom-8 right-8 z-[60] bg-luxury-ink text-white p-5 rounded-full shadow-2xl shadow-glow-accent/40 border border-glow-accent/20 flex items-center justify-center group overflow-hidden"
+      >
+        <div className="absolute inset-0 bg-glow-accent translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[0.22, 1, 0.36, 1]"></div>
+        <Camera className="w-6 h-6 relative z-10" />
+        <span className="max-w-0 overflow-hidden whitespace-nowrap text-[10px] uppercase tracking-widest font-bold group-hover:max-w-xs group-hover:ml-3 transition-all duration-500 relative z-10">Face Scan Ritual</span>
+      </motion.button>
+
       {/* AI Consultant Modal */}
       <AnimatePresence>
         {isConsultantOpen && (
@@ -660,15 +757,15 @@ export default function App() {
                     <Sparkles className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-serif italic">GlowUp AI Scan</h3>
-                    <p className="text-[10px] uppercase tracking-widest text-glow-accent">Personalized Consultation</p>
+                    <h3 className="text-xl font-serif italic">Face Analysis Scan</h3>
+                    <p className="text-[10px] uppercase tracking-widest text-glow-accent">AI Ritual Consultant</p>
                   </div>
                 </div>
 
                 {!advice ? (
                   <div className="space-y-6">
                     {/* Scanner Container */}
-                    <div className="relative aspect-video bg-black rounded-2xl overflow-hidden shadow-inner group">
+                    <div className="relative aspect-[3/4] max-h-[300px] mx-auto bg-black rounded-3xl overflow-hidden shadow-2xl group">
                       {isScanning ? (
                         <>
                           <video 
@@ -678,15 +775,19 @@ export default function App() {
                             className="scanner-video h-full w-full object-cover"
                           />
                           <div className="scan-line"></div>
+                          {/* Face Guide Overlay */}
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <div className="w-[70%] h-[75%] border-2 border-white/20 rounded-[50%_50%_45%_45%/60%_60%_40%_40%] shadow-[0_0_0_800px_rgba(0,0,0,0.6)]"></div>
+                          </div>
                           <div className="absolute top-4 left-4 flex gap-2">
                             <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>
-                            <span className="text-[8px] text-white uppercase tracking-widest font-bold bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">Scanning Skin Features...</span>
+                            <span className="text-[8px] text-white uppercase tracking-widest font-bold bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">Analyzing Face Geometry...</span>
                           </div>
                         </>
                       ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center text-white/40 gap-4">
                           <Camera className="w-12 h-12 stroke-[1px]" />
-                          <p className="text-[10px] uppercase tracking-[0.2em]">Camera Feed Inactive</p>
+                          <p className="text-[10px] uppercase tracking-[0.2em]">Ready For Face Ritual Scan</p>
                         </div>
                       )}
                     </div>
@@ -709,7 +810,7 @@ export default function App() {
                           </button>
                           <button 
                             onClick={handleConsult}
-                            disabled={loadingAdvice || !consultationText.trim()}
+                            disabled={loadingAdvice || (!consultationText.trim() && !isScanning)}
                             className="py-4 bg-glow-accent text-white rounded-xl font-semibold tracking-wide flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-glow-header transition-all group"
                           >
                             {loadingAdvice ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 group-hover:scale-110 transition-transform" />}
@@ -719,7 +820,7 @@ export default function App() {
                       </div>
                     ) : (
                       <div className="flex flex-col items-center py-6 text-center">
-                        <p className="text-sm italic text-luxury-ink/60 mb-2">Keep your face within the frame...</p>
+                        <p className="text-sm italic text-luxury-ink/60 mb-2">Align with the frame for depth analysis...</p>
                         <div className="flex gap-2">
                           {[0, 1, 2].map((i) => (
                             <motion.div 
@@ -788,10 +889,32 @@ export default function App() {
           <div>
             <h4 className="text-[10px] uppercase tracking-[0.3em] font-bold text-glow-accent mb-8">Newsletter</h4>
             <p className="text-xs text-white/50 mb-4">Join our inner circle for exclusive rituals.</p>
-            <div className="flex border-b border-white/20 py-2">
-              <input type="email" placeholder="Email Address" className="bg-transparent text-xs w-full focus:outline-none" />
-              <button className="text-xs uppercase tracking-widest font-bold">Join</button>
-            </div>
+            <form onSubmit={handleNewsletterSignup} className="flex border-b border-white/20 py-2">
+              <input 
+                type="email" 
+                placeholder={newsletterStatus === "success" ? "Subscribed!" : "Email Address"}
+                disabled={newsletterStatus === "loading" || newsletterStatus === "success"}
+                value={newsletterEmail}
+                onChange={(e) => setNewsletterEmail(e.target.value)}
+                className="bg-transparent text-xs w-full focus:outline-none disabled:opacity-50" 
+              />
+              <button 
+                type="submit"
+                disabled={newsletterStatus === "loading" || newsletterStatus === "success"}
+                className="text-xs uppercase tracking-widest font-bold disabled:opacity-50 flex items-center gap-2"
+              >
+                {newsletterStatus === "loading" ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : newsletterStatus === "success" ? (
+                  <CheckCircle2 className="w-3 h-3 text-glow-accent" />
+                ) : (
+                  "Join"
+                )}
+              </button>
+            </form>
+            {newsletterStatus === "error" && (
+              <p className="text-[10px] text-red-400 mt-2">Something went wrong. Please try again.</p>
+            )}
           </div>
         </div>
         <div className="max-w-7xl mx-auto mt-16 pt-8 border-t border-white/5 text-[10px] text-white/30 uppercase tracking-widest text-center">

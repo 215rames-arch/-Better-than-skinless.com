@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 1. Primitive Definition Helpers
+    function isSignedIn() { return request.auth != null; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    
+    // Admin check - would normally check a trusted source.
+    // For this app, let's assume we might have an admins collection.
+    function isAdmin() { return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+
+    // 2. Validation Blueprint for NewsletterSubscription
+    function isValidNewsletterSubscription(data) {
+      return data.keys().hasAll(['email', 'subscribedAt']) 
+          && data.keys().size() == 2
+          && data.email is string 
+          && data.email.size() <= 256
+          && data.email.matches('^[^@]+@[^@]+\\.[^@]+$') // Simple email regex
+          && data.subscribedAt == request.time;
+    }
+
+    // 3. Collection Rules
+    match /newsletter_subscriptions/{subscriptionId} {
+      allow create: if isValidId(subscriptionId) && isValidNewsletterSubscription(incoming());
+      // Only admins can see the list of subscribers
+      allow read, update, delete: if isAdmin();
+    }
+  }
+}
